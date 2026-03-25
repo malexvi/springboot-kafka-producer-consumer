@@ -1,6 +1,504 @@
 # Kafka with Spring Boot 3 - Producer & Consumer
 
-This project demonstrates how to build **Apache Kafka applications** using **Spring Boot 3**.
+This us a hands on approach to learn **Apache Kafka ** using **Spring Boot 3**.
+
+## How to run
+
+docker compose up on the root directory
+
+## First Interaction with Kafka Producer and Consumer
+
+![producer\_consumer.png](readme_images/producer_consumer.png)
+
+In this example, we will use two separate terminals: one for the **producer** and another for the **consumer**.
+
+---
+
+### Prerequisites
+
+Make sure our Kafka container is running:
+
+```bash
+docker ps
+```
+
+We should see something like:
+
+```bash
+CONTAINER ID   IMAGE                             STATUS       PORTS                                  NAMES
+9c3dd56c03e4   confluentinc/cp-kafka:7.3.2       Up 22 hours  0.0.0.0:9092->9092/tcp                kafka1
+461c96207f8f   confluentinc/cp-zookeeper:7.3.2   Up 22 hours  0.0.0.0:2181->2181/tcp                zoo1
+```
+
+---
+
+### Step 1: Access the Kafka container
+
+Run this command in **both terminals**:
+
+```bash
+docker exec -it kafka1 bash
+```
+
+---
+
+### Step 2: Create a Kafka topic
+
+```bash
+kafka-topics --bootstrap-server kafka1:19092 \
+--create \
+--topic test-topic \
+--replication-factor 1 \
+--partitions 1
+```
+
+> `kafka1:19092` refers to the `KAFKA_ADVERTISED_LISTENERS` configured in your `docker-compose.yml`.
+
+---
+
+### Step 3: Start the Producer
+
+In the first terminal:
+
+```bash
+kafka-console-producer \
+--bootstrap-server kafka1:19092 \
+--topic test-topic
+```
+
+---
+
+### Step 4: Start the Consumer
+
+In the second terminal:
+
+```bash
+kafka-console-consumer \
+--bootstrap-server kafka1:19092 \
+--topic test-topic \
+--from-beginning
+```
+
+---
+
+### Result
+
+Now, type messages in the **producer terminal** and we will see them appear in the **consumer terminal** in real time.
+
+This demonstrates the basic communication flow between a Kafka **producer** and **consumer**.
+
+## Kafka partition ordering
+
+Kafka messages sent by a producer contain two main properties:
+
+- **Key**
+- **Value**
+
+When a key is provided, Kafka uses a hashing strategy (via the partitioner) to determine which partition the message
+will be sent to.
+
+This guarantees that messages with the same key are always routed to the same partition (as long as the number of
+partitions does not change).
+
+#### Example
+
+Given the following messages:
+
+- Alpha
+- Beta
+- Gamma
+- Delta
+
+If all messages use the same key (e.g., `"A"`), Kafka will hash this key and send all of them to the same partition.
+Otherwise, if the messages didn't have keys or different keys, all of them would be routed to different partitions
+
+This behavior is important because it preserves **ordering** for messages that share the same key.
+![img.png](readme_images/terminals.png)
+
+## Examples with Key
+
+### Produce Messages with Key and Value
+
+```bash
+docker exec --interactive --tty kafka1 \
+kafka-console-producer \
+--bootstrap-server kafka1:19092 \
+--topic test-topic \
+--property "key.separator=-" \
+--property "parse.key=true"
+```
+
+Send messages using the format:
+
+```
+key-value
+```
+
+#### Example:
+
+```
+A-Alpha
+A-Beta
+A-Gamma
+A-Delta
+```
+
+---
+
+### Consume Messages with Key and Value
+
+```bash
+docker exec --interactive --tty kafka1 \
+kafka-console-consumer \
+--bootstrap-server kafka1:19092 \
+--topic test-topic \
+--from-beginning \
+--property "key.separator=-" \
+--property "print.key=true"
+```
+
+---
+
+### Output
+
+The console will display messages including both **key** and **value**:
+
+![key\_separator.png](readme_images/from_beginning.png)
+
+---
+
+### Error When Sending Message Without Key
+
+If we try to send a message without a key:
+
+```
+test with no key
+```
+
+We will get the following error:
+
+```text
+org.apache.kafka.common.KafkaException: No key separator found on line number 1: 'test with no key'
+at kafka.tools.ConsoleProducer$LineMessageReader.parse(ConsoleProducer.scala:374)
+at kafka.tools.ConsoleProducer$LineMessageReader.readMessage(ConsoleProducer.scala:349)
+at kafka.tools.ConsoleProducer$.main(ConsoleProducer.scala:50)
+at kafka.tools.ConsoleProducer.main(ConsoleProducer.scala)
+```
+
+Consumer Offsets
+aNY MESSAGE THAT IS PRODUCED IN THE TOPIC WILL HAVE A UNIC ID called offset
+Consumer have three options to read
+
+* from-beginning
+* latest (read only the messages that going come after the consumer is spun up, meaning read the messages in the topic
+  by poassing a specif offset from the consumer only done programatically  )
+* specific-offset
+
+___
+
+## Offset and `--from-beginning`
+
+![consumer_offset.png](readme_images/consumer_offset.png)
+
+* from-beginning
+    * Starts from the beginning, so starts from offset 0 and increase one by one, once all records are read, the
+      consumer commits the offiset the internal topic? __consumer_offsets com o 'Group ID'. The consumer goes down and
+      new records may eventualy be produced on the topic in the meantime, now the consumer knows from where to start
+      reading the messages based on the __consumer_offsets
+    *
+
+In Apache Kafka, each message inside a partition has a unique and sequential **offset**, which represents its position
+in the log.
+
+For example:
+
+```text
+Offset | Message
+0      | ABC
+1      | DEF
+2      | GHI
+...    | ...
+N      | XXX
+```
+
+## Kafka Consumer Groups
+
+This section describes the concepts, scalability, and practical implementation of Consumer Groups in Apache Kafka.
+
+
+## The Problem: Processing Latency (Lag)
+
+![img.png](readme_images/one_consumer.png)
+
+Imagine a topic called `test-topic` with **4 partitions**.
+
+
+If we have only one consumer:
+
+* **Consumer A** (`group.id = group1`)
+
+It will be responsible for pulling data from **all 4 partitions**.
+
+Since message consumption within a single instance is typically **single-threaded**, if the producer sends messages faster than the consumer can process them, **consumer lag** occurs.
+
+This prevents events from being processed in real time.
+
+---
+
+## The Solution: Consumer Groups
+
+Consumer Groups allow **horizontal and parallel scaling** of message consumption.
+
+---
+
+## How Scalability Works
+
+### 2 Instances
+
+If we spin up a second instance of Consumer A using the same `group.id`, Kafka will split the partitions between them:
+
+![img.png](two_consumers.png)
+
+* **Instance 1** → Partitions 0 and 1
+* **Instance 2** → Partitions 2 and 3
+
+---
+
+### Maximum Capacity
+
+The ideal level of parallelism is reached when:
+
+```text
+number of consumers = number of partitions
+```
+
+In this case:
+
+```text
+4 partitions → 4 consumers
+```
+
+---
+
+### Idle Consumers
+![img.png](readme_images/INDLE.png)
+If there are more consumers than partitions:
+
+* Extra consumers will remain **idle**
+* They act as **failover instances**
+* They take over if an active consumer fails
+
+---
+
+## Multiple Groups
+![img.png](groups.png)
+Different applications can consume the same topic simultaneously.
+
+Each application must have its own **unique `group.id`**.
+
+This ensures:
+
+* Each group maintains its own offsets
+* Each group reads messages independently
+
+---
+
+## Group Management
+
+### Responsibility
+
+Kafka brokers are responsible for managing consumer groups.
+
+---
+
+### Group Coordinator
+
+One broker acts as the **Group Coordinator**, responsible for:
+
+* Managing members joining and leaving the group
+* Triggering **rebalancing**
+
+---
+
+## Practical Guide with Docker
+
+### 1. List Existing Consumer Groups
+
+If we run a consumer without specifying a group, Kafka creates a random ID:
+
+```text
+console-consumer-41911
+```
+
+Command:
+
+```bash
+docker exec -it kafka1 \
+kafka-consumer-groups \
+--bootstrap-server kafka1:19092 \
+--list
+```
+
+---
+
+### 2. Run a Consumer in a Specific Group
+
+To test parallelism, run this command in **two different terminals** using the same group:
+
+```bash
+docker exec -it kafka1 \
+kafka-console-consumer \
+--bootstrap-server kafka1:19092 \
+--topic test-topic \
+--group console-consumer-41911 \
+--property "key.separator= - " \
+--property "print.key=true"
+```
+
+---
+
+### 3. Alter and Describe Topic Partitions
+
+#### Describe Topic
+
+```bash
+docker exec -it kafka1 \
+kafka-topics \
+--bootstrap-server kafka1:19092 \
+--describe \
+--topic test-topic
+```
+
+#### Increase Partitions
+
+```bash
+docker exec -it kafka1 \
+kafka-topics \
+--bootstrap-server kafka1:19092 \
+--alter \
+--topic test-topic \
+--partitions 2
+```
+
+---
+
+### 4. Testing Parallelism (Producer)
+
+When sending messages with keys, Kafka routes them to different partitions.
+
+```bash
+docker exec -it kafka1 \
+kafka-console-producer \
+--bootstrap-server kafka1:19092 \
+--topic test-topic \
+--property "key.separator=-" \
+--property "parse.key=true"
+```
+
+---
+
+#### Testing Example
+
+```text
+a-abc → Processed by Terminal 1
+1-one → Processed by Terminal 2
+```
+
+---
+
+### Conclusion
+
+The `group.id` is one of the most critical properties in Kafka.
+
+It defines how the processing load is distributed.
+
+If we have:
+
+```text
+40 partitions → up to 40 consumers in parallel
+```
+
+This ensures that data is processed as efficiently and quickly as possible.
+
+
+### How Offset Works
+
+Kafka stores the progress of a consumer using offsets. This information is persisted in an internal topic called:
+
+```text
+__consumer_offsets
+```
+
+When a consumer reads messages, Kafka keeps track of the **last committed offset** for that consumer group.
+
+This allows us to:
+
+* Resume consumption from where we left off
+* Avoid reprocessing messages unnecessarily
+* Replay messages when needed
+
+---
+
+### Understanding `--from-beginning`
+
+When we start a consumer using:
+
+```bash
+kafka-console-consumer \
+--bootstrap-server kafka1:19092 \
+--topic test-topic \
+--from-beginning
+```
+
+we are instructing Kafka to:
+
+> Read all messages from the earliest available offset (usually offset 0)
+
+This means:
+
+* We will consume the entire history of the topic
+* The consumer will start from the first message ever produced
+
+---
+
+### Important Behavior
+
+If a consumer group already has a committed offset:
+
+* Kafka will resume from the last committed offset
+* The `--from-beginning` flag will only take effect if there is **no prior offset stored**
+
+---
+
+### Example Scenario
+
+1. Messages are produced to a partition:
+
+    * ABC (offset 0)
+    * DEF (offset 1)
+    * GHI (offset 2)
+
+2. A consumer reads up to offset 2 and commits it
+
+3. New messages arrive:
+
+    * XXX (offset N+1, N+2, ...)
+
+4. When the consumer restarts:
+
+    * We will continue from the last committed offset
+    * Only new messages will be consumed
+
+---
+
+### Key Takeaways
+
+* Offset represents the position of a message inside a partition
+* Offsets are tracked per **consumer group**
+* `--from-beginning` allows full replay of messages
+* Kafka ensures durability and replayability through offset management
+
+___
 
 ## What is covered
 
@@ -24,6 +522,7 @@ This project demonstrates how to build **Apache Kafka applications** using **Spr
 
 ## Tech Stack
 
+- Docker
 - Java 17+
 - Spring Boot 3
 - Apache Kafka
