@@ -256,7 +256,7 @@ Consumer Groups allow **horizontal and parallel scaling** of message consumption
 
 If we spin up a second instance of Consumer A using the same `group.id`, Kafka will split the partitions between them:
 
-![img.png](two_consumers.png)
+![two_consumers.png](readme_images/two_consumers.png)
 
 * **Instance 1** → Partitions 0 and 1
 * **Instance 2** → Partitions 2 and 3
@@ -441,7 +441,8 @@ This allows us to:
 
 ## Commit Log & Retention Policy
 
-Kafka stores messages in an **append-only commit log**, organized by partitions. Messages are written sequentially and persisted on disk.
+Kafka stores messages in an **append-only commit log**, organized by partitions. Messages are written sequentially and
+persisted on disk.
 
 ---
 
@@ -638,6 +639,273 @@ If a consumer group already has a committed offset:
 * Kafka ensures durability and replayability through offset management
 
 ___
+
+## Kafka as a Distributed Streaming System
+
+Kafka is a **distributed streaming platform**.
+
+Before diving deeper, let's recall what a distributed system is:
+
+- A collection of systems working together to deliver value
+- High availability and fault tolerance
+- Reliable workload distribution
+- Easy scalability
+- Concurrency handled more efficiently
+
+## Problem: Single Point of Failure
+
+If we have:
+
+- One Kafka broker
+- Producers and consumers connected to it
+
+We end up with a **single point of failure**.
+
+If the broker goes down, the entire system becomes unavailable.
+
+## Solution: Kafka Cluster
+
+To solve this, Kafka uses a cluster of multiple brokers.
+
+- Multiple brokers work together
+- :contentReference[oaicite:1]{index=1} manages the cluster
+- Brokers send heartbeats to ZooKeeper
+- ZooKeeper keeps track of which brokers are healthy and active
+
+If a broker fails:
+
+- ZooKeeper detects the failure
+- Requests are routed to other brokers
+- The system continues to operate without interruption
+
+## How Kafka Handles Data Loss
+
+Kafka prevents data loss through **replication**:
+
+- Topics are replicated across multiple brokers
+- Each partition has leader and follower replicas
+- If a broker fails, another replica takes over
+
+This ensures durability and high availability.
+
+# Kafka Topic Distribution, Partition Leadership, and Consumer Groups
+
+This note explains how Kafka distributes topics across brokers, how producers choose partitions, how consumers know where to read from, and how consumer groups split the work.
+
+## 1) How topics are distributed on brokers
+
+A Kafka **cluster** is made of multiple brokers, for example:
+
+* Broker 1
+* Broker 2
+* Broker 3
+
+A **topic** is not stored as one single block of data. Instead, it is split into **partitions**.
+
+A topic like `test-topic` might look like this:
+
+* `test-topic-0`
+* `test-topic-1`
+* `test-topic-2`
+
+Each partition belongs to a broker as its **leader** and may also exist on other brokers as **replicas**.
+
+### Important idea
+
+Kafka does not store the whole topic on one broker. It spreads partitions across the cluster so that load and storage are distributed.
+
+## 2) What is a partition leader?
+
+Every partition has one broker that acts as the **leader**.
+
+The leader is the broker that:
+
+* handles produce requests for that partition
+* handles fetch requests from consumers
+* coordinates reads and writes for that partition
+
+The other copies of the same partition are called **followers** or **replicas**.
+
+### Example
+
+For one partition:
+
+* Broker 1 = leader
+* Broker 2 = follower
+* Broker 3 = follower
+
+If Broker 1 fails, one of the replicas can become the new leader.
+
+## 3) Producer flow and the partitioner
+
+A producer does not randomly send data to any broker.
+
+Inside the producer, there is a component called the **partitioner**.
+
+The partitioner decides **which partition** a record should go to.
+
+### How the partitioner chooses a partition
+
+The decision can depend on:
+
+* the message key
+* round-robin behavior when no key is provided
+* a custom partitioner implementation
+
+### Common rule
+
+If a record has a key, Kafka usually sends records with the same key to the same partition. This is useful when ordering matters.
+
+If there is no key, Kafka may spread records across partitions to balance traffic.
+
+### Very important detail
+
+The partitioner does **not** choose a broker directly.
+
+It chooses a **partition**, and then the producer sends the record to the **leader broker** of that partition.
+
+## 4) How a producer knows where the leader is
+
+The producer keeps metadata about the cluster.
+
+That metadata tells it:
+
+* which topic exists
+* how many partitions the topic has
+* which broker is the leader for each partition
+
+So the flow is:
+
+1. Producer asks Kafka for metadata
+2. Producer chooses a partition using the partitioner
+3. Producer finds the leader broker for that partition
+4. Producer sends the record to that broker
+
+If leadership changes because a broker goes down, the producer refreshes metadata and sends requests to the new leader.
+
+## 5) How a consumer knows from where to pull
+
+A consumer also uses cluster metadata.
+
+But before reading data, the consumer usually joins a **consumer group**.
+
+Kafka then assigns partitions to the consumers inside that group.
+
+After assignment, the consumer knows:
+
+* which partitions it owns
+* which broker is the leader for each of those partitions
+* where to start reading from in each partition
+
+### The read flow
+
+1. Consumer joins a group
+2. Kafka assigns partitions to that consumer
+3. Consumer requests data from the leader broker of each assigned partition
+4. Consumer reads records in offset order
+
+## 6) How Kafka distributes client requests
+
+Kafka distributes client requests mainly through **partitions and leaders**.
+
+### Producer requests
+
+Producer requests go to the leader of the target partition.
+
+That means traffic is spread across brokers as long as partitions are spread across brokers.
+
+### Consumer requests
+
+Consumer requests are fetch requests sent to the leader of the assigned partition.
+
+So the broker that leads a partition is the one that serves reads for that partition.
+
+## 7) Kafka consumer groups
+
+A **consumer group** is a set of consumers working together to read the same topic.
+
+Kafka guarantees that, inside the same group, **one partition is assigned to only one consumer at a time**.
+
+This avoids duplicate work inside the group.
+
+### Example with three consumers
+
+If you have:
+
+* 3 consumer instances
+* 3 partitions
+
+Then Kafka can assign:
+
+* Consumer 1 → Partition 0
+* Consumer 2 → Partition 1
+* Consumer 3 → Partition 2
+
+Each consumer reads only the partition assigned to it.
+
+### Example with more consumers than partitions
+
+If you have:
+
+* 3 consumers
+* 2 partitions
+
+Then only 2 consumers will be active for that topic.
+
+One consumer will not receive any partition because a partition cannot be shared inside the same group.
+
+### Example with more partitions than consumers
+
+If you have:
+
+* 2 consumers
+* 4 partitions
+
+Then each consumer may receive multiple partitions.
+
+## 8) Does each pull call go to the leader?
+
+Yes.
+
+When a consumer fetches records from a partition, the fetch request goes to the **leader replica** of that partition.
+
+The leader serves the reads, while followers stay in sync by replicating data from the leader.
+
+## 9) A simple full example
+
+Imagine a topic called `test-topic` with 3 partitions:
+
+* `test-topic-0` on Broker 1 as leader
+* `test-topic-1` on Broker 2 as leader
+* `test-topic-2` on Broker 3 as leader
+
+### Producer side
+
+* Producer receives a record
+* Partitioner chooses `test-topic-1`
+* Producer sends the record to Broker 2, because Broker 2 is the leader of partition 1
+
+### Consumer side
+
+* Three consumers join the same consumer group
+* Kafka assigns one partition to each consumer
+* Each consumer fetches from the leader broker of its assigned partition
+
+## 10) Main takeaways
+
+* A topic is split into partitions
+* Partitions are spread across brokers
+* Each partition has one leader and optional replicas
+* The producer partitioner chooses the partition, not the broker directly
+* The producer sends data to the leader of that partition
+* The consumer learns its partitions through consumer group assignment
+* Consumers fetch data from the leader of each assigned partition
+* Inside one consumer group, a partition is assigned to only one consumer at a time
+
+## 11) One-sentence summary
+
+Kafka distributes work by splitting topics into partitions, assigning each partition a leader broker, and using producer partitioning plus consumer group assignment to route writes and reads efficiently across the cluster.
+
 
 ## What is covered
 
