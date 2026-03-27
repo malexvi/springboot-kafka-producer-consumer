@@ -225,13 +225,11 @@ N      | XXX
 
 This section describes the concepts, scalability, and practical implementation of Consumer Groups in Apache Kafka.
 
-
 ## The Problem: Processing Latency (Lag)
 
 ![img.png](readme_images/one_consumer.png)
 
 Imagine a topic called `test-topic` with **4 partitions**.
-
 
 If we have only one consumer:
 
@@ -239,7 +237,8 @@ If we have only one consumer:
 
 It will be responsible for pulling data from **all 4 partitions**.
 
-Since message consumption within a single instance is typically **single-threaded**, if the producer sends messages faster than the consumer can process them, **consumer lag** occurs.
+Since message consumption within a single instance is typically **single-threaded**, if the producer sends messages
+faster than the consumer can process them, **consumer lag** occurs.
 
 This prevents events from being processed in real time.
 
@@ -281,6 +280,7 @@ In this case:
 ---
 
 ### Idle Consumers
+
 ![img.png](readme_images/INDLE.png)
 If there are more consumers than partitions:
 
@@ -291,6 +291,7 @@ If there are more consumers than partitions:
 ---
 
 ## Multiple Groups
+
 ![img.png](groups.png)
 Different applications can consume the same topic simultaneously.
 
@@ -420,7 +421,6 @@ If we have:
 
 This ensures that data is processed as efficiently and quickly as possible.
 
-
 ### How Offset Works
 
 Kafka stores the progress of a consumer using offsets. This information is persisted in an internal topic called:
@@ -438,6 +438,145 @@ This allows us to:
 * Replay messages when needed
 
 ---
+
+## Commit Log & Retention Policy
+
+Kafka stores messages in an **append-only commit log**, organized by partitions. Messages are written sequentially and persisted on disk.
+
+---
+
+## Retention Policy
+
+The **retention policy** determines how long messages are kept in Kafka before being deleted.
+
+This is configured using:
+
+```properties
+log.retention.hours=168
+```
+
+* Default value: **168 hours (7 days)**
+* After this period, messages become eligible for deletion
+* Retention is based on **time**, not whether messages were consumed
+
+---
+
+## Accessing Broker Configuration (Docker)
+
+To inspect the Kafka broker configuration:
+
+```bash
+docker exec -it kafka1 bash
+```
+
+Navigate to the configuration directory:
+
+```bash
+cd /etc/kafka/
+ls
+```
+
+You should see a file called:
+
+```text
+server.properties
+```
+
+To view its contents:
+
+```bash
+cat server.properties
+```
+
+Look for:
+
+```properties
+log.retention.hours=168
+```
+
+---
+
+## Inspecting Kafka Log Files
+
+Kafka stores data on disk inside the container.
+
+Navigate to the data directory:
+
+```bash
+cd /var/lib/kafka/data/
+ls
+```
+
+You will see directories like:
+
+```text
+__consumer_offsets-0
+test-topic-0
+```
+
+Each directory represents a **partition**.
+
+---
+
+### Example: Inspect a Topic Partition
+
+```bash
+cd test-topic-0
+ls
+```
+
+Output:
+
+```text
+00000000000000000000.log
+00000000000000000000.index
+00000000000000000000.timeindex
+leader-epoch-checkpoint
+partition.metadata
+```
+
+---
+
+## Understanding the Files
+
+* `.log` → actual messages stored sequentially
+* `.index` → helps Kafka quickly locate messages by offset
+* `.timeindex` → maps timestamps to offsets
+* `leader-epoch-checkpoint` → tracks leader changes
+* `partition.metadata` → partition metadata
+
+---
+
+## How Consumers Read Data
+
+When a consumer connects to Kafka:
+
+* It does **not** read directly from these files
+* It requests data from the **broker**
+* The broker reads from the commit log and returns messages
+
+If we use `--from-beginning` or a new consumer group:
+
+* Kafka will read from the earliest available offset
+* Data is served from these log files internally
+
+---
+
+## Important Behavior
+
+* Messages remain available **until the retention policy expires**
+* Consumption does **not delete messages**
+* Multiple consumers can read the same data independently
+
+---
+
+## Summary
+
+* Kafka uses an append-only **commit log**
+* Data is stored per **partition** on disk
+* Retention is time-based (default: 7 days)
+* Consumers read through the broker, not directly from disk
+* Messages can be replayed as long as they are retained
 
 ### Understanding `--from-beginning`
 
