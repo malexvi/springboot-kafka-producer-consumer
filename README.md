@@ -536,6 +536,75 @@ leader-epoch-checkpoint
 partition.metadata
 ```
 
+# KafkaTemplate.send() — Behind the Scenes
+
+## Flow Overview
+`KafkaTemplate.send()` goes through several internal steps before a message is actually published to a Kafka topic.
+
+---
+
+## 1. Serializer
+The client must provide serializers for both key and value:
+- `key.serializer`
+- `value.serializer`
+
+In this project, we will use the **default serializers**.
+
+---
+
+## 2. Partitioner
+This layer determines which partition the message will be sent to within a topic.
+
+- The Kafka Producer API provides a **default partitioner**
+- It handles partition selection automatically
+- We will use the **default partitioner**
+
+---
+
+## 3. RecordAccumulator
+Messages are **not sent immediately** after calling `send()`.
+
+Instead:
+- Records are stored in a buffer called the **RecordAccumulator**
+- This helps reduce the number of network calls to the Kafka cluster
+
+### Key Concepts:
+- Records are grouped into a **RecordBatch**
+- Controlled by:
+    - `batch.size` → defines the maximum size of the batch (memory limit)
+
+---
+
+## 4. Batch Sending Behavior
+- Once the batch is **full**, the messages are sent to the Kafka topic
+- However, there are scenarios where the batch may **never fill up**
+
+---
+
+## 5. linger.ms
+To handle cases where batches don't fill up:
+
+- `linger.ms` defines how long the producer waits before sending messages
+- If:
+    - The batch is **not full**, and
+    - The time specified by `linger.ms` is reached
+
+👉 Then the accumulated records are sent to Kafka anyway
+
+---
+
+## Summary
+- Messages are buffered before being sent
+- Kafka optimizes throughput using batching
+- `batch.size` controls batch capacity
+- `linger.ms` controls max wait time before sending
+
+
+Configuring  KafkaTemplate
+Mandatory Values 
+bootstrap-servers: localhost:9092, localhost:9093, localhost:9094  (Represents the broker address)
+key-serializer: or.apache.kafka.common.serialization.IntegerSerializer
+value-serializer: org.apache.kafka.common.serialization.StringSerializer
 ---
 
 ## Understanding the Files
@@ -690,7 +759,8 @@ This ensures durability and high availability.
 
 # Kafka Topic Distribution, Partition Leadership, and Consumer Groups
 
-This note explains how Kafka distributes topics across brokers, how producers choose partitions, how consumers know where to read from, and how consumer groups split the work.
+This note explains how Kafka distributes topics across brokers, how producers choose partitions, how consumers know
+where to read from, and how consumer groups split the work.
 
 ## 1) How topics are distributed on brokers
 
@@ -712,7 +782,8 @@ Each partition belongs to a broker as its **leader** and may also exist on other
 
 ### Important idea
 
-Kafka does not store the whole topic on one broker. It spreads partitions across the cluster so that load and storage are distributed.
+Kafka does not store the whole topic on one broker. It spreads partitions across the cluster so that load and storage
+are distributed.
 
 ## 2) What is a partition leader?
 
@@ -754,7 +825,8 @@ The decision can depend on:
 
 ### Common rule
 
-If a record has a key, Kafka usually sends records with the same key to the same partition. This is useful when ordering matters.
+If a record has a key, Kafka usually sends records with the same key to the same partition. This is useful when ordering
+matters.
 
 If there is no key, Kafka may spread records across partitions to balance traffic.
 
@@ -904,8 +976,8 @@ Imagine a topic called `test-topic` with 3 partitions:
 
 ## 11) One-sentence summary
 
-Kafka distributes work by splitting topics into partitions, assigning each partition a leader broker, and using producer partitioning plus consumer group assignment to route writes and reads efficiently across the cluster.
-
+Kafka distributes work by splitting topics into partitions, assigning each partition a leader broker, and using producer
+partitioning plus consumer group assignment to route writes and reads efficiently across the cluster.
 
 ## What is covered
 
