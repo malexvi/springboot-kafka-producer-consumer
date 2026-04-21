@@ -1114,10 +1114,25 @@ Imagine a topic called `test-topic` with 3 partitions:
 * Consumers fetch data from the leader of each assigned partition
 * Inside one consumer group, a partition is assigned to only one consumer at a time
 
-## 11) One-sentence summary
+How to list topics
+```
+$ docker exec --interactive --tty kafka1 kafka-topics --bootstrap-server kafka1:19092 --list
+__consumer_offsets
+library-events
+```
+marco@DESKTOP-POIBB7K MINGW64 ~/IdeaProjects/springboot-kafka-producer-consumer/library-events-producer (main)
+$ docker exec --interactive --tty kafka1 kafka-topics --bootstrap-server kafka1:19092 --list
+__consumer_offsets
+library-events
 
-Kafka distributes work by splitting topics into partitions, assigning each partition a leader broker, and using producer
-partitioning plus consumer group assignment to route writes and reads efficiently across the cluster.
+marco@DESKTOP-POIBB7K MINGW64 ~/IdeaProjects/springboot-kafka-producer-consumer/library-events-producer (main)
+$ docker exec --interactive --tty kafka1 kafka-topics --bootstrap-server kafka1:19092 --describe
+Topic: library-events   TopicId: xTmyzPdzSE2hqZcaePlfWA PartitionCount: 3       ReplicationFactor: 1    Configs:
+Topic: library-events   Partition: 0    Leader: 1       Replicas: 1     Isr: 1
+Topic: library-events   Partition: 1    Leader: 1       Replicas: 1     Isr: 1
+Topic: library-events   Partition: 2    Leader: 1       Replicas: 1     Isr: 1
+Topic: __consumer_offsets       TopicId: H94AXeefQ_mWwGeYojqtMQ PartitionCount: 50      ReplicationFactor: 1    Configs: compression.type=producer,cleanup.policy=compact,segment.bytes=104857600
+
 
 ## What is covered
 
