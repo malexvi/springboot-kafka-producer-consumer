@@ -2,7 +2,7 @@
 
 This us a hands on approach to learn **Apache Kafka ** using **Spring Boot 3**.
 
-## How to run
+## Kafka basics
 
 docker compose up on the root directory
 
@@ -1114,25 +1114,50 @@ Imagine a topic called `test-topic` with 3 partitions:
 * Consumers fetch data from the leader of each assigned partition
 * Inside one consumer group, a partition is assigned to only one consumer at a time
 
-How to list topics
-```
-$ docker exec --interactive --tty kafka1 kafka-topics --bootstrap-server kafka1:19092 --list
-__consumer_offsets
-library-events
-```
-marco@DESKTOP-POIBB7K MINGW64 ~/IdeaProjects/springboot-kafka-producer-consumer/library-events-producer (main)
-$ docker exec --interactive --tty kafka1 kafka-topics --bootstrap-server kafka1:19092 --list
-__consumer_offsets
-library-events
 
-marco@DESKTOP-POIBB7K MINGW64 ~/IdeaProjects/springboot-kafka-producer-consumer/library-events-producer (main)
-$ docker exec --interactive --tty kafka1 kafka-topics --bootstrap-server kafka1:19092 --describe
-Topic: library-events   TopicId: xTmyzPdzSE2hqZcaePlfWA PartitionCount: 3       ReplicationFactor: 1    Configs:
-Topic: library-events   Partition: 0    Leader: 1       Replicas: 1     Isr: 1
-Topic: library-events   Partition: 1    Leader: 1       Replicas: 1     Isr: 1
-Topic: library-events   Partition: 2    Leader: 1       Replicas: 1     Isr: 1
-Topic: __consumer_offsets       TopicId: H94AXeefQ_mWwGeYojqtMQ PartitionCount: 50      ReplicationFactor: 1    Configs: compression.type=producer,cleanup.policy=compact,segment.bytes=104857600
+## Running the Local Kafka Cluster
 
+For local development, we use a Kafka cluster consisting of 3 Brokers and 1 Zookeeper instance running via Docker Compose.
+
+**1. Start the Cluster**
+Navigate to the directory containing the `docker-compose-multi-broker.yml` file and run the following command to start the containers in the background:
+```bash
+docker compose -f docker-compose-multi-broker.yml up -d
+```
+
+**2. Verify Status**
+To ensure all 4 containers (1 Zookeeper and 3 Kafka brokers) are running correctly, execute:
+```bash
+docker ps
+```
+
+**3. Stop the Cluster**
+When you are finished with development, you can shut down the cluster using:
+```bash
+docker compose -f docker-compose-multi-broker.yml down
+```
+
+---
+
+## Automatic Topic Creation
+
+There is no need to manually create topics in Kafka before running the application. The application is configured to automatically provision the required topics during startup using the `AutoCreateConfig` class.
+
+### How it works:
+Spring Boot uses a `NewTopic` bean to instruct the cluster to create the topic if it does not already exist.
+
+```java
+@Bean
+public NewTopic libraryEvents(){
+    return TopicBuilder
+            .name(topic)        // Name defined in application.yml (library-events)
+            .partitions(3)      // 3 partitions to allow parallel consumption
+            .replicas(3)        // Replication factor of 3 (ensures fault tolerance across our 3 local brokers)
+            .build();
+}
+```
+* **Partitions (3):** Allows up to 3 consumers to read messages simultaneously, increasing throughput.
+* **Replicas (3):** Because we have 3 brokers running in Docker, setting the replication factor to 3 ensures that every broker has a copy of the data. If two brokers go down, the data remains accessible on the third.
 
 ## What is covered
 
