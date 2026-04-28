@@ -14,6 +14,10 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
 
 @Component
 @Slf4j
@@ -25,66 +29,78 @@ public class LibraryEventsProducer {
     private final KafkaTemplate<Integer, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
-
     public LibraryEventsProducer(KafkaTemplate<Integer, String> kafkaTemplate, ObjectMapper objectMapper) {
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
     }
 
     public CompletableFuture<SendResult<Integer, String>> sendLibraryEvent(LibraryEvent libraryEvent) throws JsonProcessingException {
-
         var key = libraryEvent.LibraryEventId();
         var value = objectMapper.writeValueAsString(libraryEvent);
 
-        //1. The fitrst time this method is called
-        // A blocking call happens - get metadata about the kafka cluster
-
-        //2. After the first time, all subsequent will be non-blocking
-        // Send message happens - returns a CompletableFuture
-        var completableFuture  = kafkaTemplate.send(topic, key, value);
+        // 1. blocking call - get metadata about the kafka cluster
+        //2.Send message happens - Returns a CompletableFuture
+        var completableFuture = kafkaTemplate.send(topic, key, value);
 
         return completableFuture
-                .whenComplete((sendResult, throwable)->{
-                    if(throwable != null){
+                .whenComplete((sendResult, throwable) -> {
+                    if(throwable!=null){
                         handleFailure(key, value, throwable);
-                    } else {
+                    }else{
                         handleSuccess(key, value, sendResult);
                     }
                 });
+
     }
 
     public CompletableFuture<SendResult<Integer, String>> sendLibraryEvent_approach3(LibraryEvent libraryEvent) throws JsonProcessingException {
-
         var key = libraryEvent.LibraryEventId();
         var value = objectMapper.writeValueAsString(libraryEvent);
 
-        var producerRecord = buildProducerRecord(key, value);
-
-        var completableFuture  = kafkaTemplate.send(producerRecord);
+        var producerRecord = buildProducerRecord(key,value);
+        // 1. blocking call - get metadata about the kafka cluster
+        //2.Send message happens - Returns a CompletableFuture
+        var completableFuture = kafkaTemplate.send(producerRecord);
 
         return completableFuture
-                .whenComplete((sendResult, throwable)->{
-                    if(throwable != null){
+                .whenComplete((sendResult, throwable) -> {
+                    if(throwable!=null){
                         handleFailure(key, value, throwable);
-                    } else {
+                    }else{
                         handleSuccess(key, value, sendResult);
                     }
                 });
+
     }
 
     private ProducerRecord<Integer, String> buildProducerRecord(Integer key, String value) {
 
-        List<Header> recordHeaders = List.of(new RecordHeader("event-source", "scanner".getBytes()));
+        List<Header> recordHeaders = List.of(new RecordHeader("event-source","scanner".getBytes()));
 
-        return new ProducerRecord<>(topic, null, key, value, recordHeaders);
+        return new ProducerRecord<>(topic,null, key, value, recordHeaders);
+    }
+
+    public SendResult<Integer, String> sendLibraryEvent_approach2(LibraryEvent libraryEvent)
+            throws JsonProcessingException, ExecutionException, InterruptedException, TimeoutException {
+        var key = libraryEvent.LibraryEventId();
+        var value = objectMapper.writeValueAsString(libraryEvent);
+
+        // 1. blocking call - get metadata about the kafka cluster
+        //2. Block and wait until the message is sent to the Kafka
+        var sendResult = kafkaTemplate.send(topic, key, value)
+                //.get();
+                .get(3, TimeUnit.SECONDS);
+        handleSuccess(key,value,sendResult);
+        return sendResult;
+
     }
 
     private void handleSuccess(Integer key, String value, SendResult<Integer, String> sendResult) {
-        log.info("Message sent successfully for the key: {} and the value is {}, partition is {}",
+        log.info("Message Sent Successfully for the key : {} and the value : {} , partition is {} ",
                 key, value, sendResult.getRecordMetadata().partition());
     }
 
     private void handleFailure(Integer key, String value, Throwable ex) {
-        log.error("Error sending the message and the exception is {}", ex.getMessage(), ex);
+        log.error("Error sending the message and the exception is {} ", ex.getMessage(), ex );
     }
 }

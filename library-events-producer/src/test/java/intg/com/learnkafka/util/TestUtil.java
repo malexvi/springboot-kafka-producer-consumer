@@ -8,6 +8,8 @@ import com.learnkafka.libraryeventsproducer.domain.LibraryEventType;
 
 public class TestUtil {
 
+    public static ObjectMapper objectMapper;
+
     public static Book bookRecord(){
 
         return new Book(123, "Dilip","Kafka Using Spring Boot" );
@@ -64,5 +66,12 @@ public class TestUtil {
             } catch (JsonProcessingException e) {
                 throw new RuntimeException(e);
             }
+    }
+
+    public static ObjectMapper objectMapper() {
+        if(objectMapper == null){
+            objectMapper = new ObjectMapper();
+        }
+        return objectMapper;
     }
 }
