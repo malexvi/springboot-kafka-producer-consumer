@@ -539,12 +539,15 @@ partition.metadata
 # KafkaTemplate.send() — Behind the Scenes
 
 ## Flow Overview
+
 `KafkaTemplate.send()` goes through several internal steps before a message is actually published to a Kafka topic.
 
 ---
 
 ## 1. Serializer
+
 The client must provide serializers for both key and value:
+
 - `key.serializer`
 - `value.serializer`
 
@@ -553,6 +556,7 @@ In this project, we will use the **default serializers**.
 ---
 
 ## 2. Partitioner
+
 This layer determines which partition the message will be sent to within a topic.
 
 - The Kafka Producer API provides a **default partitioner**
@@ -562,13 +566,16 @@ This layer determines which partition the message will be sent to within a topic
 ---
 
 ## 3. RecordAccumulator
+
 Messages are **not sent immediately** after calling `send()`.
 
 Instead:
+
 - Records are stored in a buffer called the **RecordAccumulator**
 - This helps reduce the number of network calls to the Kafka cluster
 
 ### Key Concepts:
+
 - Records are grouped into a **RecordBatch**
 - Controlled by:
     - `batch.size` → defines the maximum size of the batch (memory limit)
@@ -576,12 +583,14 @@ Instead:
 ---
 
 ## 4. Batch Sending Behavior
+
 - Once the batch is **full**, the messages are sent to the Kafka topic
 - However, there are scenarios where the batch may **never fill up**
 
 ---
 
 ## 5. linger.ms
+
 To handle cases where batches don't fill up:
 
 - `linger.ms` defines how long the producer waits before sending messages
@@ -594,14 +603,14 @@ To handle cases where batches don't fill up:
 ---
 
 ## Summary
+
 - Messages are buffered before being sent
 - Kafka optimizes throughput using batching
 - `batch.size` controls batch capacity
 - `linger.ms` controls max wait time before sending
 
-
-Configuring  KafkaTemplate
-Mandatory Values 
+Configuring KafkaTemplate
+Mandatory Values
 bootstrap-servers: localhost:9092, localhost:9093, localhost:9094  (Represents the broker address)
 key-serializer: or.apache.kafka.common.serialization.IntegerSerializer
 value-serializer: org.apache.kafka.common.serialization.StringSerializer
@@ -617,11 +626,10 @@ value-serializer: org.apache.kafka.common.serialization.StringSerializer
 
 ---
 
-
-
 # How Spring Boot Auto-Configures Kafka (Producer Side)
 
-This project uses **Spring Boot Kafka auto-configuration**, which means we don’t manually create most Kafka-related beans. Instead, Spring Boot wires everything based on what we define in `application.yml`.
+This project uses **Spring Boot Kafka auto-configuration**, which means we don’t manually create most Kafka-related
+beans. Instead, Spring Boot wires everything based on what we define in `application.yml`.
 
 ---
 
@@ -704,6 +712,7 @@ DefaultKafkaProducerFactory
 If we don’t define a `KafkaTemplate`, Spring Boot creates one:
 
 ```java
+
 @Bean
 @ConditionalOnMissingBean(KafkaTemplate.class)
 KafkaTemplate<?, ?> kafkaTemplate(...)
@@ -753,9 +762,8 @@ KafkaTemplate
 We don’t configure Kafka manually.
 
 Instead:
-Spring Boot reads our configuration and builds all required Kafka components automatically — unless we explicitly override them.
-
-
+Spring Boot reads our configuration and builds all required Kafka components automatically — unless we explicitly
+override them.
 
 ## How Consumers Read Data
 
@@ -1114,25 +1122,29 @@ Imagine a topic called `test-topic` with 3 partitions:
 * Consumers fetch data from the leader of each assigned partition
 * Inside one consumer group, a partition is assigned to only one consumer at a time
 
-
 ## Running the Local Kafka Cluster
 
-For local development, we use a Kafka cluster consisting of 3 Brokers and 1 Zookeeper instance running via Docker Compose.
+For local development, we use a Kafka cluster consisting of 3 Brokers and 1 Zookeeper instance running via Docker
+Compose.
 
 **1. Start the Cluster**
-Navigate to the directory containing the `docker-compose-multi-broker.yml` file and run the following command to start the containers in the background:
+Navigate to the directory containing the `docker-compose-multi-broker.yml` file and run the following command to start
+the containers in the background:
+
 ```bash
 docker compose -f docker-compose-multi-broker.yml up -d
 ```
 
 **2. Verify Status**
 To ensure all 4 containers (1 Zookeeper and 3 Kafka brokers) are running correctly, execute:
+
 ```bash
 docker ps
 ```
 
 **3. Stop the Cluster**
 When you are finished with development, you can shut down the cluster using:
+
 ```bash
 docker compose -f docker-compose-multi-broker.yml down
 ```
@@ -1141,14 +1153,17 @@ docker compose -f docker-compose-multi-broker.yml down
 
 ## Automatic Topic Creation
 
-There is no need to manually create topics in Kafka before running the application. The application is configured to automatically provision the required topics during startup using the `AutoCreateConfig` class.
+There is no need to manually create topics in Kafka before running the application. The application is configured to
+automatically provision the required topics during startup using the `AutoCreateConfig` class.
 
 ### How it works:
+
 Spring Boot uses a `NewTopic` bean to instruct the cluster to create the topic if it does not already exist.
 
 ```java
+
 @Bean
-public NewTopic libraryEvents(){
+public NewTopic libraryEvents() {
     return TopicBuilder
             .name(topic)        // Name defined in application.yml (library-events)
             .partitions(3)      // 3 partitions to allow parallel consumption
@@ -1156,8 +1171,27 @@ public NewTopic libraryEvents(){
             .build();
 }
 ```
+
 * **Partitions (3):** Allows up to 3 consumers to read messages simultaneously, increasing throughput.
-* **Replicas (3):** Because we have 3 brokers running in Docker, setting the replication factor to 3 ensures that every broker has a copy of the data. If two brokers go down, the data remains accessible on the third.
+* **Replicas (3):** Because we have 3 brokers running in Docker, setting the replication factor to 3 ensures that every
+  broker has a copy of the data. If two brokers go down, the data remains accessible on the third.
+
+## Kafka Producer Configurations
+
+* acks the key configuration for data delivery
+    * Possible values:
+        * 0,1 and -1 (all)
+            * 1: Guarantees message is written to a leader
+            * -1: (all) guarantees message is written to a leder and to all the replicas (default) (Data is critical)
+            * 0: no guarantee (not Recommended). Is considered successfull as soon as the send call is invoked
+* retries: Takes care of retring the record in case of any failure producing the messages to the Kafka
+  * Possible values:
+    * Integer value = [0 -2147483647]
+    * In spring Kafka, the default value is 2147483647
+* retry.backoff.ms: 
+  * Integer value represented in miliseconds
+  * Default value is 100ms
+* and so much more..... https://kafka.apache.org/41/configuration/producer-configs/
 
 ## What is covered
 

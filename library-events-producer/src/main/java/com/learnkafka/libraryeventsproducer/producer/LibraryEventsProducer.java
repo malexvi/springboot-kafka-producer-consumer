@@ -35,7 +35,7 @@ public class LibraryEventsProducer {
     }
 
     public CompletableFuture<SendResult<Integer, String>> sendLibraryEvent(LibraryEvent libraryEvent) throws JsonProcessingException {
-        var key = libraryEvent.LibraryEventId();
+        var key = libraryEvent.libraryEventId();
         var value = objectMapper.writeValueAsString(libraryEvent);
 
         // 1. blocking call - get metadata about the kafka cluster
@@ -54,7 +54,7 @@ public class LibraryEventsProducer {
     }
 
     public CompletableFuture<SendResult<Integer, String>> sendLibraryEvent_approach3(LibraryEvent libraryEvent) throws JsonProcessingException {
-        var key = libraryEvent.LibraryEventId();
+        var key = libraryEvent.libraryEventId();
         var value = objectMapper.writeValueAsString(libraryEvent);
 
         var producerRecord = buildProducerRecord(key,value);
@@ -82,7 +82,7 @@ public class LibraryEventsProducer {
 
     public SendResult<Integer, String> sendLibraryEvent_approach2(LibraryEvent libraryEvent)
             throws JsonProcessingException, ExecutionException, InterruptedException, TimeoutException {
-        var key = libraryEvent.LibraryEventId();
+        var key = libraryEvent.libraryEventId();
         var value = objectMapper.writeValueAsString(libraryEvent);
 
         // 1. blocking call - get metadata about the kafka cluster

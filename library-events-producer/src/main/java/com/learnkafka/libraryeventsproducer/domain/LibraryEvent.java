@@ -5,7 +5,7 @@ import jakarta.validation.constraints.NotNull;
 
 //TODO - ADD BETTER SRP
 public record LibraryEvent(
-        Integer LibraryEventId,
+        Integer libraryEventId,
         LibraryEventType libraryEventType,
 
         @NotNull
