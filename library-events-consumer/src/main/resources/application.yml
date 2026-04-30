@@ -13,7 +13,7 @@ spring:
       bootstrap-servers: localhost:9092,localhost:9093,localhost:9094
       key-deserializer: org.apache.kafka.common.serialization.IntegerDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      group-id: library-events
+      group-id: library-events-listener-group
 ---
 spring:
   config:
