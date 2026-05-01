@@ -1185,13 +1185,149 @@ public NewTopic libraryEvents() {
             * -1: (all) guarantees message is written to a leder and to all the replicas (default) (Data is critical)
             * 0: no guarantee (not Recommended). Is considered successfull as soon as the send call is invoked
 * retries: Takes care of retring the record in case of any failure producing the messages to the Kafka
-  * Possible values:
-    * Integer value = [0 -2147483647]
-    * In spring Kafka, the default value is 2147483647
-* retry.backoff.ms: 
-  * Integer value represented in miliseconds
-  * Default value is 100ms
+    * Possible values:
+        * Integer value = [0 -2147483647]
+        * In spring Kafka, the default value is 2147483647
+* retry.backoff.ms:
+    * Integer value represented in miliseconds
+    * Default value is 100ms
 * and so much more..... https://kafka.apache.org/41/configuration/producer-configs/
+
+## Committing Offsets
+
+Reference:
+https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/message-listener-container.html#committing-offsets
+
+### MANUAL
+
+* **Topic**: `library-events`
+* **Consumer**: Kafka Consumer
+
+In this mode, we explicitly control when offsets are committed.
+
+The consumer runs a **poll loop**, retrieving new records assigned to it from the topic. Each record is processed one by one.
+
+After processing each record, we must manually acknowledge it. This acknowledgment allows us to track which records and offsets have been processed.
+
+Even though we acknowledge records individually, the actual **offset commit only happens after all records from the poll are processed**. Until then, offset tracking is handled internally.
+
+Once processing is complete, offsets are committed to the `__consumer_offsets` topic.
+
+---
+
+### How it works in practice
+
+We have a topic called `library-events` and a Kafka consumer.
+
+The consumer continuously polls the topic for new events. After processing an event, it commits the corresponding offset. This ensures the consumer knows where to resume when polling again.
+
+This mechanism prevents reprocessing the same event under normal conditions.
+
+---
+
+### Multiple consumers and rebalancing
+
+If multiple consumers are part of the same consumer group:
+
+* Kafka distributes partitions among them
+* Each partition is consumed by only one consumer at a time
+* Offsets are tracked per consumer group
+
+The producer is not aware of consumers. Kafka handles coordination and partition assignment.
+
+---
+
+### Offset commit strategies
+
+Kafka supports multiple offset commit strategies, including:
+
+* Automatic commit
+* Manual commit
+* Manual immediate commit
+
+Each strategy provides different levels of control and reliability depending on the use case.
+
+
+## Consuming Events with Manual ACK (Kafka + Spring Boot)
+
+The **manual offset control (manual ACK)**, giving us full control over when a message is considered successfully processed.
+
+### Consumer Configuration
+
+```java id="cfg001"
+@Configuration
+public class LibraryEventsConsumerConfig {
+
+    private final KafkaProperties properties;
+
+    public LibraryEventsConsumerConfig(KafkaProperties kafkaProperties){
+        this.properties = kafkaProperties;
+    }
+
+    /// First of all, we get method 	
+    /// ConcurrentKafkaListenerContainerFactory<?, ?> kafkaListenerContainerFactory( from the class KafkaAnnotationDrivenConfiguration
+    @Bean
+    @ConditionalOnMissingBean(name = "kafkaListenerContainerFactory")
+    ConcurrentKafkaListenerContainerFactory<?, ?> kafkaListenerContainerFactory(
+            ConcurrentKafkaListenerContainerFactoryConfigurer configurer,
+            ObjectProvider<ConsumerFactory<Object, Object>> kafkaConsumerFactory,
+            ObjectProvider<ContainerCustomizer<Object, Object, ConcurrentMessageListenerContainer<Object, Object>>> kafkaContainerCustomizer,
+            ObjectProvider<SslBundles> sslBundles) {
+
+        ConcurrentKafkaListenerContainerFactory<Object, Object> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+
+        configurer.configure(factory,
+                kafkaConsumerFactory.getIfAvailable(() ->
+                        new DefaultKafkaConsumerFactory<>(
+                                this.properties.buildConsumerProperties(sslBundles.getIfAvailable())
+                        )
+                )
+        );
+
+        // Enable manual acknowledgment mode
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
+
+        kafkaContainerCustomizer.ifAvailable(factory::setContainerCustomizer);
+        return factory;
+    }
+}
+```
+
+---
+
+### Consumer with Manual Acknowledgment
+
+```java id="cfg002"
+@Component
+@Slf4j
+// We then need to implement our consumer with AcknowledgingMessageListener<K,V> of our type of event
+public class LibraryEventsConsumerManualOffSet implements AcknowledgingMessageListener<Integer, String> {
+
+    @Override
+    @KafkaListener(topics = {"library-events"})
+    public void onMessage(ConsumerRecord<Integer, String> consumerRecord,
+                          @Nullable Acknowledgment acknowledgment) {
+
+        log.info("ConsumerRecord : {} ", consumerRecord);
+
+        // !!IMPORTANT!! Manually acknowledge the message
+        acknowledgment.acknowledge();
+    }
+}
+```
+
+---
+
+### Why use manual ACK?
+
+* We have full control over when a message is acknowledged
+* We prevent message loss in case of failures
+* We can implement retries and custom error handling
+* We support critical workflows (e.g., payments, important events)
+
+> Important: when using `MANUAL`, we must call `acknowledge()` explicitly; otherwise, the message may be reprocessed.
+
 
 ## What is covered
 
