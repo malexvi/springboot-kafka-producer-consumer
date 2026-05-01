@@ -1,5 +1,6 @@
 package com.learnkafka.entity;
 
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
@@ -22,5 +23,6 @@ public class LibraryEvent {
     @OneToOne(mappedBy = "libraryEvent",
             cascade =CascadeType.ALL )
     @ToString.Exclude // out of memory error
-    Book book;
+    @JsonManagedReference
+    private Book book;
 }
