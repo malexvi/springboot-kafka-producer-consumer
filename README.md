@@ -1328,6 +1328,116 @@ public class LibraryEventsConsumerManualOffSet implements AcknowledgingMessageLi
 
 > Important: when using `MANUAL`, we must call `acknowledge()` explicitly; otherwise, the message may be reprocessed.
 
+## Kafka Listener Container Factories and Concurrency
+
+This configuration defines two `ConcurrentKafkaListenerContainerFactory` beans to illustrate how Kafka consumers behave with and without concurrency.
+
+---
+
+### Default Factory (Single-threaded Consumption)
+
+```java
+@Bean
+ConcurrentKafkaListenerContainerFactory<?, ?> k2afkaListenerContainerFactory(
+        ConcurrentKafkaListenerContainerFactoryConfigurer configurer,
+        ObjectProvider<ConsumerFactory<Object, Object>> kafkaConsumerFactory,
+        ObjectProvider<ContainerCustomizer<Object, Object, ConcurrentMessageListenerContainer<Object, Object>>> kafkaContainerCustomizer,
+        ObjectProvider<SslBundles> sslBundles) {
+
+    ConcurrentKafkaListenerContainerFactory<Object, Object> factory =
+            new ConcurrentKafkaListenerContainerFactory<>();
+
+    configurer.configure(factory,
+            kafkaConsumerFactory.getIfAvailable(() ->
+                    new DefaultKafkaConsumerFactory<>(
+                            this.properties.buildConsumerProperties(sslBundles.getIfAvailable())
+                    )
+            )
+    );
+
+    kafkaContainerCustomizer.ifAvailable(factory::setContainerCustomizer);
+    return factory;
+}
+```
+
+#### Behavior
+
+* A single consumer thread is created
+* This consumer is assigned **multiple partitions**
+* The poll loop retrieves records from all assigned partitions
+* Processing still happens sequentially within the same thread
+
+From the logs, we can observe:
+
+* Partitions `library-events-0`, `library-events-1`, and `library-events-2` are assigned to the same consumer
+* Offsets are fetched and tracked per partition
+* One thread handles all partitions
+
+This means that even with multiple partitions, processing is not parallelized.
+
+---
+
+### Concurrent Factory (Multi-threaded Consumption)
+
+```java
+@Bean
+ConcurrentKafkaListenerContainerFactory<?, ?> kafkaListenerContainerFactory(
+        ConcurrentKafkaListenerContainerFactoryConfigurer configurer,
+        ObjectProvider<ConsumerFactory<Object, Object>> kafkaConsumerFactory,
+        ObjectProvider<ContainerCustomizer<Object, Object, ConcurrentMessageListenerContainer<Object, Object>>> kafkaContainerCustomizer,
+        ObjectProvider<SslBundles> sslBundles) {
+
+    ConcurrentKafkaListenerContainerFactory<Object, Object> factory =
+            new ConcurrentKafkaListenerContainerFactory<>();
+
+    configurer.configure(factory,
+            kafkaConsumerFactory.getIfAvailable(() ->
+                    new DefaultKafkaConsumerFactory<>(
+                            this.properties.buildConsumerProperties(sslBundles.getIfAvailable())
+                    )
+            )
+    );
+
+    factory.setConcurrency(3);
+
+    kafkaContainerCustomizer.ifAvailable(factory::setContainerCustomizer);
+    return factory;
+}
+```
+
+#### Behavior
+
+* Three consumer threads are created (`concurrency = 3`)
+* Each thread acts as an independent Kafka consumer within the same consumer group
+* Kafka distributes partitions across these consumers
+
+From the logs, we can observe:
+
+* Each consumer is assigned a single partition:
+
+    * Thread 1 → `library-events-0`
+    * Thread 2 → `library-events-1`
+    * Thread 3 → `library-events-2`
+* Offsets are managed independently per partition and per thread
+
+This enables **parallel processing**, since each partition is consumed independently.
+
+---
+
+### Key Takeaways
+
+* Without concurrency:
+
+    * One consumer handles all partitions
+    * Processing is sequential
+
+* With concurrency:
+
+    * Multiple consumers are created within the same application
+    * Partitions are distributed among them
+    * Processing becomes parallel
+
+> Important: the maximum effective concurrency is limited by the number of partitions. If there are more threads than partitions, some threads will remain idle.
 
 ## What is covered
 
