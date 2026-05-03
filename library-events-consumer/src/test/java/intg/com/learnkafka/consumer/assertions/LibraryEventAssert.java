@@ -75,4 +75,24 @@ public class LibraryEventAssert extends AbstractAssert<LibraryEventAssert, Libra
 
         return this;
     }
+
+    public LibraryEventAssert hasEqualName(String expected){
+        isNotNull();
+
+        assertThat(actual.getBook().getBookName())
+                .as("bookName")
+                .isEqualTo(expected);
+
+        return this;
+    }
+
+    public LibraryEventAssert hasEqualAuthorName(String expected){
+        isNotNull();
+
+        assertThat(actual.getBook().getBookAuthor())
+                .as("bookAuthor")
+                .isEqualTo(expected);
+
+        return this;
+    }
 }

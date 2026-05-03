@@ -27,14 +27,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isA;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.*;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.StreamSupport;
 
 // 1. @SpringBootTest: Sobe a aplicação Spring inteira (como se estivesse rodando em produção).
 // RANDOM_PORT: Inicia o servidor Tomcat em uma porta aleatória para evitar conflitos de porta na sua máquina.
@@ -48,7 +46,7 @@ import java.util.stream.StreamSupport;
         "spring.kafka.producer.bootstrap-servers=${spring.embedded.kafka.brokers}",
         "spring.kafka.consumer.bootstrap-servers=${spring.embedded.kafka.brokers}"
 })
-class LibraryEventsConsumerIntegrationTest {
+class LibraryEventsConsumerIntegrationTest { //@SpringBootTest + @EmbeddedKafka (When integration test, don't mock)
 
     @Autowired
     EmbeddedKafkaBroker embeddedKafkaBroker;
@@ -156,7 +154,7 @@ class LibraryEventsConsumerIntegrationTest {
 
         assertThat(eventList)
                 .extracting(LibraryEvent::getLibraryEventId)
-                        .isNot(null);
+                .isNot(null);
 
         eventList.forEach(libraryEvent -> {
             assert libraryEvent.getLibraryEventId() != null;
@@ -211,6 +209,98 @@ class LibraryEventsConsumerIntegrationTest {
                                             .hasNonNullId()
                             );
                 });
+    }
+
+
+    //  kafkaTemplate.sendDefault(...)   ← (producer)
+    //          ↓
+    //  Kafka (broker — no teste é o EmbeddedKafka)
+    //          ↓
+    //  Spring Kafka Listener Container
+    //        ↓
+    //  @KafkaListener (onMessage)       ← (consumer)
+    //          ↓
+    //   lógica (service, repository…)
+    // kafkaTemplate.send() → Spring chama @KafkaListener
+    @Test
+    void publishUpdateLibraryEventAsyncDefaultWithAssertClass() throws Exception {
+
+        // =========================
+        // GIVEN - estado inicial
+        // =========================
+        Integer id = eventSavedOnDatabase().getLibraryEventId();
+
+        // =========================
+        // WHEN - evento UPDATE
+        // =========================
+        kafkaTemplate.sendDefault(buildUpdateEventPayload(id));
+
+        // =========================
+        // THEN - valida resultado
+        // =========================
+        Awaitility.await()
+                .atMost(Duration.ofSeconds(5))
+                .untilAsserted(() -> {
+
+                    // só 1 evento foi enviado
+                    verify(libraryEventsConsumerSpy, times(1))
+                            .onMessage(isA(ConsumerRecord.class));
+
+                    verify(libraryEventsServiceSpy, times(1))
+                            .processLibraryEvent(isA(ConsumerRecord.class));
+
+                    List<LibraryEvent> events = libraryEventsRepository.findAll();
+
+                    assertThat(events)
+                            .hasSize(1) // não criou outro registro
+                            .first()
+                            .satisfies(savedEvent ->
+                                    LibraryEventAssert.assertThatLibraryEvent(savedEvent)
+                                            .hasType(LibraryEventType.UPDATE)
+                                            .hasBookId(456)
+                                            .hasEqualName("New book name")
+                                            .hasEqualAuthorName("New book Author")
+                                            .hasNonNullId()
+                            );
+                });
+    }
+
+    private LibraryEvent eventSavedOnDatabase() {
+        Book book = Book.builder()
+                .bookId(456)
+                .bookName("Kafka Using Spring Boot")
+                .bookAuthor("Dilip")
+                .build();
+
+        LibraryEvent existing = LibraryEvent.builder()
+                .libraryEventType(LibraryEventType.NEW)
+                .book(book)
+                .build();
+
+        // manter consistência JPA
+        book.setLibraryEvent(existing);
+
+        // salva e deixa o banco gerar o ID
+        return libraryEventsRepository.save(existing);
+
+    }
+
+    private String buildUpdateEventPayload(Integer id) throws JsonProcessingException {
+        Book updatedBook = Book.builder()
+                .bookId(456) // mesmo bookId (você controla)
+                .bookName("New book name")
+                .bookAuthor("New book Author")
+                .build();
+
+        LibraryEvent updateEvent = LibraryEvent.builder()
+                .libraryEventId(id) // ESSENCIAL: usar o ID do banco
+                .libraryEventType(LibraryEventType.UPDATE)
+                .book(updatedBook)
+                .build();
+
+        updatedBook.setLibraryEvent(updateEvent);
+
+        return objectMapper.writeValueAsString(updateEvent);
     }
 
 }
