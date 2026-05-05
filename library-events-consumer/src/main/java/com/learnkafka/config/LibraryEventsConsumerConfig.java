@@ -17,6 +17,8 @@ import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.util.backoff.FixedBackOff;
 
+import java.util.List;
+
 @Configuration
 @Slf4j
 // @EnableKafka Needed for older versions of Spring Boot
@@ -29,12 +31,21 @@ public class LibraryEventsConsumerConfig {
     }
     public DefaultErrorHandler defaultErrorHandler(){
 
+        var exceptionsToIgnore = List.of(
+                IllegalArgumentException.class,
+                NullPointerException.class
+        );
+
         var finexBackOff = new FixedBackOff(1000L, 2); // Retry the failed record twice with the delay of 1s in between
 
         var errorHandler = new DefaultErrorHandler(finexBackOff);
 
+        exceptionsToIgnore.forEach(
+                errorHandler::addNotRetryableExceptions
+        ); // This will add the necessary exceptions that the consumer is going to ignore anytyme an exception happens
+
         errorHandler
-                .setRetryListeners((
+                .setRetryListeners((// When necessary, we can see the logs, this way we'll know what's happening
                         record, ex, deliveryAttempt) -> {
                     log.info("Failed Record in retry Listener, Exception: {}, deliveryAttempt: {} "
                             , ex.getMessage(), deliveryAttempt);
