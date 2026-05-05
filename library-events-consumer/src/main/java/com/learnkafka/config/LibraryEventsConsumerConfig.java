@@ -15,6 +15,8 @@ import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.listener.ConcurrentMessageListenerContainer;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.kafka.support.ExponentialBackOffWithMaxRetries;
+import org.springframework.util.backoff.ExponentialBackOff;
 import org.springframework.util.backoff.FixedBackOff;
 
 import java.util.List;
@@ -36,13 +38,22 @@ public class LibraryEventsConsumerConfig {
                 NullPointerException.class
         );
 
+
         var finexBackOff = new FixedBackOff(1000L, 2); // Retry the failed record twice with the delay of 1s in between
+
+        var exponentialBackOff = new ExponentialBackOffWithMaxRetries(2);
+        exponentialBackOff.setInitialInterval(1000L); // dalay of 1s
+        exponentialBackOff.setMultiplier(2.0);
+        exponentialBackOff.setInitialInterval(2_000L);
+
+
 
         var errorHandler = new DefaultErrorHandler(finexBackOff);
 
         exceptionsToIgnore.forEach(
                 errorHandler::addNotRetryableExceptions
-        ); // This will add the necessary exceptions that the consumer is going to ignore anytyme an exception happens
+                //errorHandler::addRetryableExceptions We need to create the list of what
+        );
 
         errorHandler
                 .setRetryListeners((// When necessary, we can see the logs, this way we'll know what's happening
