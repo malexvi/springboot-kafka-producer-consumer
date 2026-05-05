@@ -8,38 +8,45 @@ import com.learnkafka.entity.LibraryEvent;
 import com.learnkafka.entity.LibraryEventType;
 import com.learnkafka.jpa.LibraryEventsRepository;
 import com.learnkafka.service.LibraryEventsService;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.serialization.IntegerDeserializer;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.awaitility.Awaitility;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
+import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.MessageListenerContainer;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.ContainerTestUtils;
+import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isA;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
-import java.time.Duration;
-import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
-// 1. @SpringBootTest: Sobe a aplicação Spring inteira (como se estivesse rodando em produção).
-// RANDOM_PORT: Inicia o servidor Tomcat em uma porta aleatória para evitar conflitos de porta na sua máquina.
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest()
 // 2. @EmbeddedKafka: Inicia uma instância do Kafka e do Zookeeper na memória apenas para esse teste!
 // Ele também já cria o tópico "library-events" automaticamente antes do teste começar.
-@EmbeddedKafka(topics = {"library-events"})
+@EmbeddedKafka(topics = {"library-events", "library-events.RETRY", "library-events.DLT"}, partitions = 3)
 // 3. @TestPropertySource: Como subimos um Kafka na memória, ele vai rodar numa porta aleatória (não na 9092 do Docker).
 // Essa anotação avisa o application.yml para ignorar o localhost:9092 e usar os brokers deste Kafka embutido.
 @TestPropertySource(properties = {
@@ -69,6 +76,13 @@ class LibraryEventsConsumerIntegrationTest { //@SpringBootTest + @EmbeddedKafka 
     @MockitoSpyBean
     LibraryEventsService libraryEventsServiceSpy;
 
+    private Consumer<Integer, String> consumer;
+
+    @Value("${topics.retry}")
+    private String retryTopic;
+
+    @Value("${topics.dlt}")
+    private String dlt;
 
     @BeforeEach
     void setUp() {
@@ -77,6 +91,12 @@ class LibraryEventsConsumerIntegrationTest { //@SpringBootTest + @EmbeddedKafka 
         }
         libraryEventsRepository.deleteAll();
     }
+
+    @AfterEach
+    void tearDown() {
+        libraryEventsRepository.deleteAll();
+    }
+
 
     @Test
     void publishNewLibraryEvent() throws Exception {
@@ -308,6 +328,39 @@ class LibraryEventsConsumerIntegrationTest { //@SpringBootTest + @EmbeddedKafka 
 
         verify(libraryEventsConsumerSpy, times(1)).onMessage(isA(ConsumerRecord.class));
         verify(libraryEventsServiceSpy, times(1)).processLibraryEvent(isA(ConsumerRecord.class));
+
+    }
+
+    @Test
+    void shouldPublishToRetryTopicWhenUpdateEventHasNonExistingId() throws Exception {
+
+        Integer id = 999;
+
+        kafkaTemplate.sendDefault(buildUpdateEventPayload(id));
+
+        Awaitility.await()
+                .atMost(Duration.ofSeconds(5))
+                .untilAsserted(() -> {
+
+                    verify(libraryEventsConsumerSpy, times(1))
+                            .onMessage(isA(ConsumerRecord.class));
+
+                    verify(libraryEventsServiceSpy, times(1))
+                            .processLibraryEvent(isA(ConsumerRecord.class));
+                });
+
+        verify(libraryEventsConsumerSpy, times(1)).onMessage(isA(ConsumerRecord.class));
+        verify(libraryEventsServiceSpy, times(1)).processLibraryEvent(isA(ConsumerRecord.class));
+
+
+        var configs = new HashMap<>(KafkaTestUtils.consumerProps("group1", "true", embeddedKafkaBroker));
+        consumer = new DefaultKafkaConsumerFactory<>(configs, new IntegerDeserializer(), new StringDeserializer())
+                .createConsumer();
+        embeddedKafkaBroker.consumeFromAnEmbeddedTopic(consumer, retryTopic);
+
+        ConsumerRecord<Integer, String> consumerRecord = KafkaTestUtils.getSingleRecord(consumer, retryTopic);
+        System.out.println("ConsumerRecord is: "+ consumerRecord.value());
+        assertEquals(buildUpdateEventPayload(id), consumerRecord.value());
 
     }
 

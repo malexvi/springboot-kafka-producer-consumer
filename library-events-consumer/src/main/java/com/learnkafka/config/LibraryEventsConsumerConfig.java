@@ -1,22 +1,25 @@
 package com.learnkafka.config;
 
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.common.TopicPartition;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.kafka.ConcurrentKafkaListenerContainerFactoryConfigurer;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.boot.ssl.SslBundles;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.dao.RecoverableDataAccessException;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.config.ContainerCustomizer;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.ConcurrentMessageListenerContainer;
-import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.ExponentialBackOffWithMaxRetries;
-import org.springframework.util.backoff.ExponentialBackOff;
 import org.springframework.util.backoff.FixedBackOff;
 
 import java.util.List;
@@ -27,6 +30,15 @@ import java.util.List;
 public class LibraryEventsConsumerConfig {
 
     private final KafkaProperties properties;
+
+    @Autowired
+    KafkaTemplate kafkaTemplate;
+
+    @Value("${topics.retry}")
+    private String retry;
+
+    @Value("${topics.dlt}")
+    private String dlt;
 
     public LibraryEventsConsumerConfig(KafkaProperties kafkaProperties){
         this.properties = kafkaProperties;
@@ -48,12 +60,15 @@ public class LibraryEventsConsumerConfig {
 
 
 
-        var errorHandler = new DefaultErrorHandler(finexBackOff);
-
-        exceptionsToIgnore.forEach(
-                errorHandler::addNotRetryableExceptions
-                //errorHandler::addRetryableExceptions We need to create the list of what
+        var errorHandler = new DefaultErrorHandler(
+                publishingRecoverer(),
+                finexBackOff
         );
+
+//        exceptionsToIgnore.forEach(
+//                errorHandler::addNotRetryableExceptions
+//                //errorHandler::addRetryableExceptions We need to create the list of what
+//        );
 
         errorHandler
                 .setRetryListeners((// When necessary, we can see the logs, this way we'll know what's happening
@@ -63,6 +78,21 @@ public class LibraryEventsConsumerConfig {
                 });
         return errorHandler;
     }
+
+    public DeadLetterPublishingRecoverer publishingRecoverer(){
+
+        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate,
+                (r, e) -> {
+                    if (e.getCause() instanceof RecoverableDataAccessException) {
+                        return new TopicPartition(retry, r.partition());
+                    }
+                    else {
+                        return new TopicPartition(dlt, r.partition());
+                    }
+                });
+        return recoverer;
+    }
+
     @Bean
     ConcurrentKafkaListenerContainerFactory<?, ?> kafkaListenerContainerFactory(
             ConcurrentKafkaListenerContainerFactoryConfigurer configurer,

@@ -1205,11 +1205,14 @@ https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/message-l
 
 In this mode, we explicitly control when offsets are committed.
 
-The consumer runs a **poll loop**, retrieving new records assigned to it from the topic. Each record is processed one by one.
+The consumer runs a **poll loop**, retrieving new records assigned to it from the topic. Each record is processed one by
+one.
 
-After processing each record, we must manually acknowledge it. This acknowledgment allows us to track which records and offsets have been processed.
+After processing each record, we must manually acknowledge it. This acknowledgment allows us to track which records and
+offsets have been processed.
 
-Even though we acknowledge records individually, the actual **offset commit only happens after all records from the poll are processed**. Until then, offset tracking is handled internally.
+Even though we acknowledge records individually, the actual **offset commit only happens after all records from the poll
+are processed**. Until then, offset tracking is handled internally.
 
 Once processing is complete, offsets are committed to the `__consumer_offsets` topic.
 
@@ -1219,7 +1222,8 @@ Once processing is complete, offsets are committed to the `__consumer_offsets` t
 
 We have a topic called `library-events` and a Kafka consumer.
 
-The consumer continuously polls the topic for new events. After processing an event, it commits the corresponding offset. This ensures the consumer knows where to resume when polling again.
+The consumer continuously polls the topic for new events. After processing an event, it commits the corresponding
+offset. This ensures the consumer knows where to resume when polling again.
 
 This mechanism prevents reprocessing the same event under normal conditions.
 
@@ -1247,20 +1251,21 @@ Kafka supports multiple offset commit strategies, including:
 
 Each strategy provides different levels of control and reliability depending on the use case.
 
-
 ## Consuming Events with Manual ACK (Kafka + Spring Boot)
 
-The **manual offset control (manual ACK)**, giving us full control over when a message is considered successfully processed.
+The **manual offset control (manual ACK)**, giving us full control over when a message is considered successfully
+processed.
 
 ### Consumer Configuration
 
 ```java id="cfg001"
+
 @Configuration
 public class LibraryEventsConsumerConfig {
 
     private final KafkaProperties properties;
 
-    public LibraryEventsConsumerConfig(KafkaProperties kafkaProperties){
+    public LibraryEventsConsumerConfig(KafkaProperties kafkaProperties) {
         this.properties = kafkaProperties;
     }
 
@@ -1299,6 +1304,7 @@ public class LibraryEventsConsumerConfig {
 ### Consumer with Manual Acknowledgment
 
 ```java id="cfg002"
+
 @Component
 @Slf4j
 // We then need to implement our consumer with AcknowledgingMessageListener<K,V> of our type of event
@@ -1330,13 +1336,15 @@ public class LibraryEventsConsumerManualOffSet implements AcknowledgingMessageLi
 
 ## Kafka Listener Container Factories and Concurrency
 
-This configuration defines two `ConcurrentKafkaListenerContainerFactory` beans to illustrate how Kafka consumers behave with and without concurrency.
+This configuration defines two `ConcurrentKafkaListenerContainerFactory` beans to illustrate how Kafka consumers behave
+with and without concurrency.
 
 ---
 
 ### Default Factory (Single-threaded Consumption)
 
 ```java
+
 @Bean
 ConcurrentKafkaListenerContainerFactory<?, ?> k2afkaListenerContainerFactory(
         ConcurrentKafkaListenerContainerFactoryConfigurer configurer,
@@ -1380,6 +1388,7 @@ This means that even with multiple partitions, processing is not parallelized.
 ### Concurrent Factory (Multi-threaded Consumption)
 
 ```java
+
 @Bean
 ConcurrentKafkaListenerContainerFactory<?, ?> kafkaListenerContainerFactory(
         ConcurrentKafkaListenerContainerFactoryConfigurer configurer,
@@ -1437,7 +1446,121 @@ This enables **parallel processing**, since each partition is consumed independe
     * Partitions are distributed among them
     * Processing becomes parallel
 
-> Important: the maximum effective concurrency is limited by the number of partitions. If there are more threads than partitions, some threads will remain idle.
+> Important: the maximum effective concurrency is limited by the number of partitions. If there are more threads than
+> partitions, some threads will remain idle.
+
+# Kafka Consumer – Recovery Strategies
+
+## Context
+
+**Topic:** `library-events`
+
+**Flow:**
+```
+onMessage → Service → (Exception occurs in Service)
+```
+
+When an exception happens during processing, we need to define a **recovery strategy**.
+
+---
+
+## 1. Message Reprocessing (Retry)
+
+Used when the error is **transient** (e.g., external service temporarily unavailable).
+
+### Example scenarios
+
+- Dependent service is down
+- Network timeout
+- Intermittent failures
+
+### Options
+
+#### Option 1: Retry Topic
+
+- Publish the failed message to a **Retry Topic**
+- The consumer will reprocess it later
+
+**Points of attention:**
+- Avoid **infinite loops**
+- Define retry limits (retry count)
+- Use backoff strategies (e.g., delay between retries)
+
+---
+
+#### Option 2: Database Persistence + Scheduler
+
+- Save failed messages into a database
+- A **scheduler** periodically fetches and reprocesses them
+
+**Flow:**
+```
+Exception → Save in DB → Scheduler → Reprocess → Consumer
+```
+
+**Advantages:**
+- Full control over retries
+- Enables manual analysis
+
+**Disadvantages:**
+- Higher complexity
+- Increased latency for reprocessing
+
+---
+
+## 2. Discard Message (Skip / Dead Letter)
+
+Used when the error is **non-recoverable** (e.g., invalid payload).
+
+### Example scenarios
+
+- Validation errors
+- Inconsistent data
+- Malformed messages
+
+### Options
+
+#### Option 1: Dead Letter Topic (DLT)
+
+- Publish the failed message to a **DLT (Dead Letter Topic)**
+- Used for later analysis
+
+**Advantages:**
+- Keeps history of failures
+- Easier debugging
+
+---
+
+#### 🗄️ Option 2: Database Persistence (Tracking)
+
+- Store failed messages in a database
+
+**Purpose:**
+- Auditing
+- Monitoring
+- Manual investigation
+
+---
+
+## Summary
+
+| Strategy         | When to Use                | Tool                     |
+|------------------|----------------------------|--------------------------|
+| Retry            | Transient errors           | Retry Topic / DB         |
+| Discard (DLT)    | Non-recoverable errors     | Dead Letter Topic / DB   |
+
+---
+
+## Notes
+
+- Always distinguish between **transient** and **permanent** errors
+- Implement **retry limits**
+- Monitor DLT and persisted failures
+- Avoid infinite reprocessing loops
+
+
+
+* Invalid message: Parsing error, invalid Event
 
 ## What is covered
 
