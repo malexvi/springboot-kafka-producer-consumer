@@ -265,6 +265,48 @@ class LibraryEventsConsumerIntegrationTest { //@SpringBootTest + @EmbeddedKafka 
                 });
     }
 
+
+    //  kafkaTemplate.sendDefault(...)   ← (producer)
+    //          ↓
+    //  Kafka (broker — no teste é o EmbeddedKafka)
+    //          ↓
+    //  Spring Kafka Listener Container
+    //        ↓
+    //  @KafkaListener (onMessage)       ← (consumer)
+    //          ↓
+    //   lógica (service, repository…)
+    // kafkaTemplate.send() → Spring chama @KafkaListener
+    @Test
+    void shotTrowErrorWhenInvalidId() throws Exception {
+
+        // =========================
+        // GIVEN - estado inicial
+        // =========================
+        Integer id = null;
+
+        // =========================
+        // WHEN - evento UPDATE
+        // =========================
+        kafkaTemplate.sendDefault(buildUpdateEventPayload(id));
+
+        // =========================
+        // THEN - valida resultado
+        // =========================
+        Awaitility.await()
+                .atMost(Duration.ofSeconds(5))
+                .untilAsserted(() -> {
+
+                    verify(libraryEventsConsumerSpy, times(1))
+                            .onMessage(isA(ConsumerRecord.class));
+
+                    verify(libraryEventsServiceSpy, times(1))
+                            .processLibraryEvent(isA(ConsumerRecord.class));
+
+                    List<LibraryEvent> events = libraryEventsRepository.findAll();
+                    assertThat(events).hasSize(0);
+                });
+    }
+
     private LibraryEvent eventSavedOnDatabase() {
         Book book = Book.builder()
                 .bookId(456)
@@ -287,13 +329,13 @@ class LibraryEventsConsumerIntegrationTest { //@SpringBootTest + @EmbeddedKafka 
 
     private String buildUpdateEventPayload(Integer id) throws JsonProcessingException {
         Book updatedBook = Book.builder()
-                .bookId(456) // mesmo bookId (você controla)
+                .bookId(456)
                 .bookName("New book name")
                 .bookAuthor("New book Author")
                 .build();
 
         LibraryEvent updateEvent = LibraryEvent.builder()
-                .libraryEventId(id) // ESSENCIAL: usar o ID do banco
+                .libraryEventId(id)
                 .libraryEventType(LibraryEventType.UPDATE)
                 .book(updatedBook)
                 .build();
