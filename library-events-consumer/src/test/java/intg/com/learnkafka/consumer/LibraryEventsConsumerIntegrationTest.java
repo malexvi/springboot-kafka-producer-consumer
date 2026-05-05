@@ -305,6 +305,10 @@ class LibraryEventsConsumerIntegrationTest { //@SpringBootTest + @EmbeddedKafka 
                     List<LibraryEvent> events = libraryEventsRepository.findAll();
                     assertThat(events).hasSize(0);
                 });
+
+        verify(libraryEventsConsumerSpy, times(1)).onMessage(isA(ConsumerRecord.class));
+        verify(libraryEventsServiceSpy, times(1)).processLibraryEvent(isA(ConsumerRecord.class));
+
     }
 
     private LibraryEvent eventSavedOnDatabase() {
