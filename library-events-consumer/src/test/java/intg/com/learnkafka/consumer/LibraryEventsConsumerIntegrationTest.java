@@ -174,7 +174,7 @@ class LibraryEventsConsumerIntegrationTest { //@SpringBootTest + @EmbeddedKafka 
 
         assertThat(eventList)
                 .extracting(LibraryEvent::getLibraryEventId)
-                .isNot(null);
+                .isNotNull();
 
         eventList.forEach(libraryEvent -> {
             assert libraryEvent.getLibraryEventId() != null;
