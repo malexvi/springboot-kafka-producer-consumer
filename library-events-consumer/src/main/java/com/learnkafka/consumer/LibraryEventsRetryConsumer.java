@@ -1,6 +1,5 @@
 package com.learnkafka.consumer;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.learnkafka.service.LibraryEventsService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -10,18 +9,17 @@ import org.springframework.stereotype.Component;
 
 @Component
 @Slf4j
-public class LibraryEventsConsumer {
+public class LibraryEventsRetryConsumer {
 
     @Autowired
     private LibraryEventsService libraryEventsService;
 
-    // KafkaListener will pull the topic and give us a ConsumerRecord
     @KafkaListener(
-            topics = {"library-events"},
-            groupId = "library-events-listener-group")
-    public void onMessage(ConsumerRecord<Integer, String> consumerRecord) throws JsonProcessingException {
-        log.info("ConsumerRecord : {} ", consumerRecord);
+            topics = {"${topics.retry}"},
+            groupId = "retry-listener-group"
+    )
+    public void onMessage(ConsumerRecord<Integer, String> consumerRecord) throws Exception {
+        log.info("ConsumerRecord in Retry Consumer: {} ", consumerRecord);
         libraryEventsService.processLibraryEvent(consumerRecord);
-
     }
 }
