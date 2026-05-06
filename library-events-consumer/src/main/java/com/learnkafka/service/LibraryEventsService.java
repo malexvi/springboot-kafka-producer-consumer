@@ -2,8 +2,10 @@ package com.learnkafka.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.learnkafka.dto.LibraryEventRequest;
 import com.learnkafka.entity.LibraryEvent;
 import com.learnkafka.jpa.LibraryEventsRepository;
+import com.learnkafka.mapper.LibraryEventMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,11 +24,16 @@ public class LibraryEventsService {
     @Autowired
     private LibraryEventsRepository libraryEventsRepository;
 
+    @Autowired
+    private LibraryEventMapper libraryEventMapper;
+
     public void processLibraryEvent(ConsumerRecord<Integer, String> consumerRecord) throws JsonProcessingException {
-        LibraryEvent libraryEvent = objectMapper.readValue(consumerRecord.value(), LibraryEvent.class);
+        LibraryEventRequest libraryEventRequest = objectMapper.readValue(consumerRecord.value(), LibraryEventRequest.class);
+        LibraryEvent libraryEvent = libraryEventMapper.toEntity(libraryEventRequest);
+
         log.info("libraryEvent: {} ", libraryEvent);
 
-        if(libraryEvent != null && libraryEvent.getLibraryEventId() == 999){
+        if (libraryEvent != null && Integer.valueOf(999).equals(libraryEvent.getLibraryEventId())) {
             throw new RecoverableDataAccessException("Temporary Network Issue");
         } // Snippet to force a retry on the test, this is just an example since I'm using H2 database for integration tests
 
@@ -60,7 +67,7 @@ public class LibraryEventsService {
     }
 
     private void save(LibraryEvent libraryEvent) {
-        libraryEvent.getBook().setLibraryEvent(libraryEvent);// Why??
+        libraryEvent.getBook().setLibraryEvent(libraryEvent);
         libraryEventsRepository.save(libraryEvent);
         log.info("Successfuly Persisted the library Event: {} ", libraryEvent);
     }
