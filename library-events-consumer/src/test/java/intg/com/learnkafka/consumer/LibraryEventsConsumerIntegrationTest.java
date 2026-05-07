@@ -6,6 +6,7 @@ import com.learnkafka.consumer.assertions.LibraryEventAssert;
 import com.learnkafka.entity.Book;
 import com.learnkafka.entity.LibraryEvent;
 import com.learnkafka.entity.LibraryEventType;
+import com.learnkafka.jpa.FailureRecordRepository;
 import com.learnkafka.jpa.LibraryEventsRepository;
 import com.learnkafka.service.LibraryEventsService;
 import org.apache.kafka.clients.consumer.Consumer;
@@ -85,6 +86,9 @@ class LibraryEventsConsumerIntegrationTest { //@SpringBootTest + @EmbeddedKafka 
 
     @Value("${topics.dlt}")
     private String deadLetterTopíc;
+
+    @Autowired
+    private FailureRecordRepository failureRecordRepository;
 
     @BeforeEach
     void setUp() {
@@ -401,6 +405,23 @@ class LibraryEventsConsumerIntegrationTest { //@SpringBootTest + @EmbeddedKafka 
         ConsumerRecord<Integer, String> consumerRecord = KafkaTestUtils.getSingleRecord(consumer, deadLetterTopíc);
         System.out.println("ConsumerRecord is: " + consumerRecord.value());
         assertEquals(buildUpdateEventPayload(null), consumerRecord.value());
+    }
+
+    @Test
+    void shouldSendUpdateEventWithNullLibraryEventIdToDataBase() throws Exception {
+        kafkaTemplate.sendDefault(buildUpdateEventPayload(null));
+
+        Awaitility.await()
+                .atMost(Duration.ofSeconds(5))
+                .untilAsserted(() -> {
+                    var count = failureRecordRepository.count();
+                    assertEquals(1, count);
+                });
+
+        verify(libraryEventsConsumerSpy, times(3)).onMessage(isA(ConsumerRecord.class));
+        verify(libraryEventsServiceSpy, times(3)).processLibraryEvent(isA(ConsumerRecord.class));
+
+        failureRecordRepository.findAll().forEach(System.out::println);
     }
 
 

@@ -1,6 +1,8 @@
 package com.learnkafka.config;
 
+import com.learnkafka.service.FailureService;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,6 +19,7 @@ import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.ConcurrentMessageListenerContainer;
+import org.springframework.kafka.listener.ConsumerRecordRecoverer;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.ExponentialBackOffWithMaxRetries;
@@ -30,9 +33,14 @@ import java.util.List;
 public class LibraryEventsConsumerConfig {
 
     private final KafkaProperties properties;
+    public static final String RETRY = "RETRY";
+    public static final String DEAD = "DEAD";
 
     @Autowired
     KafkaTemplate kafkaTemplate;
+
+    @Autowired
+    FailureService failureService;
 
     @Value("${topics.retry}")
     private String retry;
@@ -40,10 +48,11 @@ public class LibraryEventsConsumerConfig {
     @Value("${topics.dlt}")
     private String dlt;
 
-    public LibraryEventsConsumerConfig(KafkaProperties kafkaProperties){
+    public LibraryEventsConsumerConfig(KafkaProperties kafkaProperties) {
         this.properties = kafkaProperties;
     }
-    public DefaultErrorHandler defaultErrorHandler(){
+
+    public DefaultErrorHandler defaultErrorHandler() {
 
         var exceptionsToIgnore = List.of(
                 IllegalArgumentException.class,
@@ -59,9 +68,9 @@ public class LibraryEventsConsumerConfig {
         exponentialBackOff.setInitialInterval(2_000L);
 
 
-
         var errorHandler = new DefaultErrorHandler(
-                publishingRecoverer(),
+                //publishingRecoverer(),
+                consumerRecordRecoverer,
                 finexBackOff
         );
 
@@ -79,14 +88,30 @@ public class LibraryEventsConsumerConfig {
         return errorHandler;
     }
 
-    public DeadLetterPublishingRecoverer publishingRecoverer(){
+    ConsumerRecordRecoverer consumerRecordRecoverer = (consumerRecord, e) -> {
+        log.error("Exception in publishingRecoverer: {}", e.getMessage(), e);
+
+        var record = (ConsumerRecord<Integer, String>) consumerRecord;
+
+        if (e.getCause() instanceof RecoverableDataAccessException) {
+            // recovery logic
+            log.info("Inside Recovery");
+            failureService.saveFailureRecord(record, e, RETRY);
+        } else {
+            // non recovery logic
+            log.info("Inside Non Recovery");
+            failureService.saveFailureRecord(record, e, DEAD);
+
+        }
+    };
+
+    public DeadLetterPublishingRecoverer publishingRecoverer() {
 
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate,
                 (r, e) -> {
                     if (e.getCause() instanceof RecoverableDataAccessException) {
                         return new TopicPartition(retry, r.partition());
-                    }
-                    else {
+                    } else {
                         return new TopicPartition(dlt, r.partition());
                     }
                 });
