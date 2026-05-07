@@ -22,7 +22,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.listener.MessageListenerContainer;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.ContainerTestUtils;
@@ -85,16 +84,16 @@ class LibraryEventsConsumerIntegrationTest { //@SpringBootTest + @EmbeddedKafka 
     private String retryTopic;
 
     @Value("${topics.dlt}")
-    private String dlt;
+    private String deadLetterTopíc;
 
     @BeforeEach
     void setUp() {
         // Since we defined  "retryListener.startup=false" on this test and  "retryListener.startup=true" on the retry test
         // We'll assing only the consumers that are on the same group id, defined on
         // LibraryEventsConsumer.class @KafkaListener( groupId = "library-events-listener-group")
-       var container = endpointRegistry.getListenerContainers()
+        var container = endpointRegistry.getListenerContainers()
                 .stream().filter(messageListenerContainer ->
-                       Objects.equals(messageListenerContainer.getGroupId(), "library-events-listener-group"))
+                        Objects.equals(messageListenerContainer.getGroupId(), "library-events-listener-group"))
                 .collect(Collectors.toList()).get(0);
 
         ContainerTestUtils.waitForAssignment(container, embeddedKafkaBroker.getPartitionsPerTopic());
@@ -376,10 +375,34 @@ class LibraryEventsConsumerIntegrationTest { //@SpringBootTest + @EmbeddedKafka 
         embeddedKafkaBroker.consumeFromAnEmbeddedTopic(consumer, retryTopic);
 
         ConsumerRecord<Integer, String> consumerRecord = KafkaTestUtils.getSingleRecord(consumer, retryTopic);
-        System.out.println("ConsumerRecord is: "+ consumerRecord.value());
+        System.out.println("ConsumerRecord is: " + consumerRecord.value());
         assertEquals(buildUpdateEventPayload(id), consumerRecord.value());
 
     }
+
+    @Test
+    void shouldSendUpdateEventWithNullLibraryEventIdToDltTopic() throws Exception {
+        kafkaTemplate.sendDefault(buildUpdateEventPayload(null));
+        Awaitility.await()
+                .atMost(Duration.ofSeconds(5))
+                .untilAsserted(() -> {
+                    verify(libraryEventsConsumerSpy, times(1))
+                            .onMessage(isA(ConsumerRecord.class));
+
+                    verify(libraryEventsServiceSpy, times(1))
+                            .processLibraryEvent(isA(ConsumerRecord.class));
+                });
+        verify(libraryEventsConsumerSpy, times(1)).onMessage(isA(ConsumerRecord.class));
+        verify(libraryEventsServiceSpy, times(1)).processLibraryEvent(isA(ConsumerRecord.class));
+        var configs = new HashMap<>(KafkaTestUtils.consumerProps("group2", "true", embeddedKafkaBroker)); // To make sure each and every consumer get its data using its own group id
+        consumer = new DefaultKafkaConsumerFactory<>(configs, new IntegerDeserializer(), new StringDeserializer())
+                .createConsumer();
+        embeddedKafkaBroker.consumeFromAnEmbeddedTopic(consumer, deadLetterTopíc);
+        ConsumerRecord<Integer, String> consumerRecord = KafkaTestUtils.getSingleRecord(consumer, deadLetterTopíc);
+        System.out.println("ConsumerRecord is: " + consumerRecord.value());
+        assertEquals(buildUpdateEventPayload(null), consumerRecord.value());
+    }
+
 
     private LibraryEvent eventSavedOnDatabase() {
         Book book = Book.builder()
