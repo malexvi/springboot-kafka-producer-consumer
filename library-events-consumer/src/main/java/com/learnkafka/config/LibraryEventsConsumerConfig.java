@@ -32,6 +32,7 @@ import java.util.List;
 // @EnableKafka Needed for older versions of Spring Boot
 public class LibraryEventsConsumerConfig {
 
+    public static final String SUCCESS = "SUCCESS";
     private final KafkaProperties properties;
     public static final String RETRY = "RETRY";
     public static final String DEAD = "DEAD";
