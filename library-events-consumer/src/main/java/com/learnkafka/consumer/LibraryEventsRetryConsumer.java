@@ -16,6 +16,7 @@ public class LibraryEventsRetryConsumer {
 
     @KafkaListener(
             topics = {"${topics.retry}"},
+            autoStartup = "${retryListener.startup:true}", // if this value is not set as part of the app.yml or TEST case then by default this is going to start the consumer
             groupId = "retry-listener-group"
     )
     public void onMessage(ConsumerRecord<Integer, String> consumerRecord) throws Exception {

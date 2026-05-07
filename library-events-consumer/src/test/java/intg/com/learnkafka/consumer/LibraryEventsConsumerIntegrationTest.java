@@ -33,8 +33,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -51,7 +53,8 @@ import static org.mockito.Mockito.verify;
 // Essa anotação avisa o application.yml para ignorar o localhost:9092 e usar os brokers deste Kafka embutido.
 @TestPropertySource(properties = {
         "spring.kafka.producer.bootstrap-servers=${spring.embedded.kafka.brokers}",
-        "spring.kafka.consumer.bootstrap-servers=${spring.embedded.kafka.brokers}"
+        "spring.kafka.consumer.bootstrap-servers=${spring.embedded.kafka.brokers}",
+        "retryListener.startup=false"// Since we're testing the consumer and not others consumers like retry and so on, we need to disable them
 })
 class LibraryEventsConsumerIntegrationTest { //@SpringBootTest + @EmbeddedKafka (When integration test, don't mock)
 
@@ -86,10 +89,20 @@ class LibraryEventsConsumerIntegrationTest { //@SpringBootTest + @EmbeddedKafka 
 
     @BeforeEach
     void setUp() {
-        for (MessageListenerContainer container : endpointRegistry.getListenerContainers()) {
-            ContainerTestUtils.waitForAssignment(container, embeddedKafkaBroker.getPartitionsPerTopic());
-        }
-        libraryEventsRepository.deleteAll();
+        // Since we defined  "retryListener.startup=false" on this test and  "retryListener.startup=true" on the retry test
+        // We'll assing only the consumers that are on the same group id, defined on
+        // LibraryEventsConsumer.class @KafkaListener( groupId = "library-events-listener-group")
+       var container = endpointRegistry.getListenerContainers()
+                .stream().filter(messageListenerContainer ->
+                       Objects.equals(messageListenerContainer.getGroupId(), "library-events-listener-group"))
+                .collect(Collectors.toList()).get(0);
+
+        ContainerTestUtils.waitForAssignment(container, embeddedKafkaBroker.getPartitionsPerTopic());
+
+//        for (MessageListenerContainer container : endpointRegistry.getListenerContainers()) {
+//            ContainerTestUtils.waitForAssignment(container, embeddedKafkaBroker.getPartitionsPerTopic());
+//        }
+//        libraryEventsRepository.deleteAll();
     }
 
     @AfterEach
@@ -164,8 +177,12 @@ class LibraryEventsConsumerIntegrationTest { //@SpringBootTest + @EmbeddedKafka 
         CountDownLatch latch = new CountDownLatch(1);
         latch.await(3, TimeUnit.SECONDS);
 
-        verify(libraryEventsConsumerSpy, times(1)).onMessage(isA(ConsumerRecord.class));
-        verify(libraryEventsServiceSpy, times(1)).processLibraryEvent(any(ConsumerRecord.class));
+        // This will test this funcionalities from  LibraryEventsConsumerConfig.class
+        // var finexBackOff = new FixedBackOff(1000L, 2); // Retry the failed record twice with the delay of 1s in between
+        // it will try to proccess the record FOR THE FIRST TIME
+        // If it failsm it will use FexBackOff to try two more times, times(3)
+        verify(libraryEventsConsumerSpy, times(3)).onMessage(isA(ConsumerRecord.class));
+        verify(libraryEventsServiceSpy, times(3)).processLibraryEvent(any(ConsumerRecord.class));
 
         List<LibraryEvent> eventList = (List<LibraryEvent>) libraryEventsRepository.findAll();
         assertThat(eventList).hasSize(1)
